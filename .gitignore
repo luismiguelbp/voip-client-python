@@ -1,3 +1,6 @@
+# macOS
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -58,6 +61,10 @@ cover/
 # Django stuff:
 *.log
 local_settings.py
+
+# Logs directory (keep directory but ignore contents)
+logs/*
+!logs/.gitkeep
 db.sqlite3
 db.sqlite3-journal
 
