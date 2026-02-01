@@ -34,6 +34,7 @@ source .venv/bin/activate
 voip_client/          # Main package
   pjsip_test.py       # PJSIP install/basic test
   pjsip_test_voip.py  # VoIPstudio registration test
+  audio_test.py       # Microphone/speaker test with recording
 ```
 
 ## Usage
@@ -70,6 +71,26 @@ Optional overrides:
 
 ```bash
 python -m voip_client.pjsip_test_voip
+```
+
+### Audio device test (microphone/speakers)
+
+Test your microphone and speakers with a loopback (hear yourself) and save a recording:
+
+```bash
+python -m voip_client.audio_test
+```
+
+Recordings are saved to `recordings/audio_test_YYYYMMDD_HHMMSS.wav` by default.
+
+Options:
+- `--duration`, `-d`: Test duration in seconds (default: 10)
+- `--output`, `-o`: Custom output WAV file path
+
+Example with custom duration:
+
+```bash
+python -m voip_client.audio_test --duration 30
 ```
 
 ## Documentation
