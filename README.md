@@ -28,6 +28,12 @@ This creates a virtual environment and installs the pjsua2 bindings.
 source .venv/bin/activate
 ```
 
+### Credentials / Security
+
+Never commit `.env`. Copy from `.env.example` and fill in real values only locally. `.env` is listed in `.gitignore`.
+
+Logs are written to `logs/`, recordings to `recordings/`; both directories are local and gitignored.
+
 All commands below assume you are in the project root with the virtual environment activated.
 
 ## Project Structure
@@ -155,6 +161,10 @@ python -m voip_client.voip_dtmf_test [destination] [--digits "1234567890#*"] [--
 ```
 
 - `--reg-timeout`: Registration timeout in seconds (default: 15) for all of the above.
+
+## Development
+
+Run from the project root with the virtual environment activated (see Setup above).
 
 ## Documentation
 
