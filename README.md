@@ -45,8 +45,10 @@ voip_client/            # Main package
   pjsip_test.py         # PJSIP install/basic test
   pjsip_test_voip.py    # VoIPstudio registration test
   pjsip_test_audio.py   # PJSIP audio test: devices, loopback, record (no SIP)
-  app_custom_call.py    # Custom outbound call: play WAV, record, hang up on Enter
+  app_phone_call.py     # Normal outbound call: two-way audio, record, hang up on Enter
   app_echo_call.py      # Echo call to any number (hear yourself)
+  app_ai_bot_call.py    # Outbound call with AI bot (Whisper STT + Chat Completions + TTS pipeline)
+  app_ai_rt_call.py     # Outbound call with AI assistant via OpenAI Realtime API (full-duplex WebSocket)
   voip_test_call.py     # Test Call (#123): connect, optional record, Enter to hang up
   voip_echo_test.py     # Echo Test (#124): hear echo, optional record/duration
   voip_dtmf_test.py     # DTMF Test (#125): send DTMF digits, then hang up
@@ -56,7 +58,7 @@ voip_client/            # Main package
 
 - **pjsip_*** – PJSIP tests (no SIP account, or registration only): `pjsip_test`, `pjsip_test_voip`, `pjsip_test_audio`. Shared helper: `pjsip_common.PjsipEndpoint`, `PjsipAudioTest`.
 - **voip_*** – Provider test scripts (VoIPstudio test numbers #123, #124, #125). Use `voip_common` (VoipSession, BaseVoipCall). Call classes: `VoipTestCall`, `VoipEchoTestCall`, `VoipDtmfTestCall`.
-- **app_*** – Application scripts (outbound calls to any number). Use `voip_common`. Call classes: `CustomOutboundCall`, `AppEchoCall`.
+- **app_*** – Application scripts (outbound calls to any number). Use `voip_common`. Call classes: `PhoneCall`, `AppEchoCall`, `AiBotCall`, `AiRtCall`.
 
 ## Usage
 
@@ -117,26 +119,87 @@ Example with custom duration:
 python -m voip_client.pjsip_test_audio --duration 30
 ```
 
-### Custom outbound call (play WAV, record, hang up on Enter)
+### Outbound phone call (two-way audio + recording)
 
-Requires the same `.env` as the VoIPstudio registration test. Calls a phone number (or extension), plays an optional WAV when the call is answered, records the call, and hangs up when you press Enter.
+Requires the same `.env` as the VoIPstudio registration test. Calls a phone number (or extension), connects normal two-way audio, records the conversation, and hangs up when you press Enter.
 
 ```bash
-python -m voip_client.app_custom_call <phone_number> [--audio WAV_PATH] [--output WAV_PATH]
+python -m voip_client.app_phone_call <phone_number> [--output WAV_PATH]
 ```
 
 - `phone_number`: Destination number or extension (e.g. `0035123456789` or an extension).
-- `--audio`, `-a`: Path to a WAV file to play to the remote party when the call is answered.
-- `--output`, `-o`: Path for the call recording (default: `recordings/call_YYYYMMDD_HHMMSS.wav`).
+- `--output`, `-o`: Output WAV file path (default: `recordings/app_phone_call_YYYYMMDD_HHMMSS.wav`).
 - `--reg-timeout`: Registration timeout in seconds (default: 15).
 
-Example:
+When the call is connected, the script prints "Call connected. Press Enter to end call and save recording." Press Enter to hang up; the recording is saved automatically.
+
+### Echo call (outbound)
+
+Call any number and hear yourself (mic routed to speaker). Same `.env` as registration test. Optional `--duration` and `--output` for recording.
 
 ```bash
-python -m voip_client.app_custom_call 0035123456789 --audio message.wav
+python -m voip_client.app_echo_call <phone_number> [--duration SECS] [--output WAV_PATH]
 ```
 
-When the call is connected, the script prints "Call connected. Press Enter to end call and save recording." Press Enter to hang up; the recording is saved automatically.
+### Outbound phone call with AI assistant
+
+Requires the same `.env` as the VoIPstudio registration test **plus** OpenAI environment variables:
+
+- `OPENAI_API_KEY` – your OpenAI API key (required)
+- `OPENAI_MODEL` – chat model for the bot pipeline (default: `gpt-4o`)
+- `OPENAI_TTS_MODEL` – TTS model for the bot pipeline (default: `tts-1`)
+- `OPENAI_TTS_VOICE` – TTS voice override for the bot pipeline
+- `OPENAI_RT_MODEL` – model used for Realtime audio in `OpenAIRealtimeBridge` (default: `gpt-realtime`)
+
+These should be defined in your local `.env`, based on `.env.example`.
+
+There are two AI call modes:
+
+#### AI Bot (Whisper STT + Chat Completions + TTS)
+
+Uses a pipeline approach: caller audio is transcribed with Whisper, processed by Chat Completions, and the response is converted back to speech with OpenAI TTS. Higher latency but supports any chat model and is more cost-effective.
+
+```bash
+python -m voip_client.app_ai_bot_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
+```
+
+- `phone_number`: Destination number or extension.
+- `--reg-timeout`: Registration timeout in seconds (default: 15).
+- `--system-message`: System/prompt instructions for the AI assistant.
+- `--voice`: OpenAI TTS voice name (default: `alloy`).
+- `--model`: Chat model to use (default: `gpt-4o`).
+- `--silence-duration`: How long (ms) to wait after silence before responding (default: 1000).
+
+#### AI Realtime (OpenAI Realtime API)
+
+Uses the OpenAI Realtime API for full-duplex audio over WebSocket. Lower latency with server-side VAD for turn detection.
+
+```bash
+python -m voip_client.app_ai_rt_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
+```
+
+- `phone_number`: Destination number or extension.
+- `--reg-timeout`: Registration timeout in seconds (default: 15).
+- `--system-message`: System/prompt instructions for the AI assistant.
+- `--voice`: OpenAI voice name (default: `alloy`).
+- `--model`: Realtime model to use (default: `gpt-realtime`, override with `OPENAI_RT_MODEL` env).
+- `--silence-duration`: How long (ms) server VAD waits after silence (default: 1000).
+- `--vad-threshold`: Server VAD activation threshold, 0.0-1.0 (default: 0.5).
+- `--prefix-padding`: Audio to include before detected speech, in ms (default: 300).
+
+### OpenAI connectivity test script
+
+To quickly verify that your OpenAI credentials and network connectivity work, use the small test helper:
+
+```bash
+python -m voip_client.openai_test
+```
+
+This script:
+
+- Loads `OPENAI_API_KEY` and `OPENAI_MODEL` (default: `gpt-5.2`) from the environment / `.env`
+- Sends a short test prompt to the chat completions API
+- Prints the assistant reply or a detailed error (for example, insufficient quota)
 
 ### VoIPstudio test cases (Test Call, Echo Test, DTMF Test)
 
@@ -162,6 +225,22 @@ python -m voip_client.voip_dtmf_test [destination] [--digits "1234567890#*"] [--
 
 - `--reg-timeout`: Registration timeout in seconds (default: 15) for all of the above.
 
+## Test checklist
+
+Use this checklist to track which scripts have been manually tested after changes:
+
+- [ ] `python -m voip_client.pjsip_test` – PJSIP install/basic test
+- [ ] `python -m voip_client.pjsip_test_voip` – VoIPstudio registration test
+- [ ] `python -m voip_client.pjsip_test_audio` – PJSIP audio (devices/loopback/record) test
+- [ ] `python -m voip_client.app_phone_call <phone_number>` – Outbound phone call (two-way audio + recording)
+- [ ] `python -m voip_client.app_echo_call <phone_number>` – Echo call application
+- [ ] `python -m voip_client.voip_test_call [destination]` – VoIPstudio Test Call (#123)
+- [ ] `python -m voip_client.voip_echo_test [destination]` – VoIPstudio Echo Test (#124)
+- [ ] `python -m voip_client.voip_dtmf_test [destination]` – VoIPstudio DTMF Test (#125)
+- [ ] `python -m voip_client.openai_test` – OpenAI connectivity test
+- [ ] `python -m voip_client.app_ai_bot_call <phone_number>` – Outbound call with AI bot (Whisper + Chat + TTS)
+- [ ] `python -m voip_client.app_ai_rt_call <phone_number>` – Outbound call with Realtime AI assistant
+
 ## Development
 
 Run from the project root with the virtual environment activated (see Setup above).
@@ -171,3 +250,5 @@ Run from the project root with the virtual environment activated (see Setup abov
 - **docs/PJSIP.md** – PJSIP overview and building the Python bindings
 - **docs/PJSIP_macOS.md**, **docs/PJSIP_Linux.md**, **docs/PJSIP_Windows.md** – Platform-specific PJSIP install
 - **docs/VoIPstudio.md** – VoIPstudio SIP settings and mapping to PJSIP
+- **docs/OpenAI_API.md** – AI Assistant architecture (Whisper pipeline and Realtime API), env vars, usage
+- **docs/AI_Assistant.md** – AI bot call: recording, transcription, sample rate, testing

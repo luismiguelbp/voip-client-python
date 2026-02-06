@@ -1,8 +1,9 @@
 """
 Common VoIP session, account, and call base classes.
 
-Shared by app_custom_call, voip_test_call, voip_echo_test, voip_dtmf_test,
-and pjsip_test_voip. All use the same .env SIP credentials.
+Shared by app_phone_call, app_echo_call, app_ai_bot_call, app_ai_rt_call,
+voip_test_call, voip_echo_test, voip_dtmf_test, and pjsip_test_voip.
+All use the same .env SIP credentials.
 """
 
 import os
@@ -76,6 +77,9 @@ class VoipAccount(pj.Account):
 class VoipSession:
     """Encapsulates endpoint, transport, and account; handles registration."""
 
+    # Default public STUN server for NAT traversal
+    DEFAULT_STUN_SERVER = "stun.l.google.com:19302"
+
     def __init__(self, env_path: Path = Path(".env")) -> None:
         load_env_file(env_path)
         self._sip_domain = require_env("SIP_DOMAIN")
@@ -88,17 +92,45 @@ class VoipSession:
         self._sip_proxy = os.getenv("SIP_PROXY", "").strip()
         sip_port = os.getenv("SIP_PORT", "").strip()
         self._sip_port = int(sip_port) if sip_port else None
+        # STUN server for NAT traversal (can be disabled by setting to empty string)
+        stun_env = os.getenv("STUN_SERVER", "").strip()
+        if stun_env == "":
+            # Not set in env: use default
+            self._stun_server = self.DEFAULT_STUN_SERVER
+        elif stun_env.lower() == "none" or stun_env.lower() == "disabled":
+            # Explicitly disabled
+            self._stun_server = None
+        else:
+            self._stun_server = stun_env
         self.endpoint: Optional[pj.Endpoint] = None
         self.account: Optional[VoipAccount] = None
 
-    def create_endpoint(self) -> None:
+    def create_endpoint(
+        self,
+        *,
+        no_vad: bool = False,
+        use_sw_clock: bool = False,
+        thread_cnt: int = 0,
+    ) -> None:
         transport_type, transport_port = transport_info(
             self._sip_transport, self._sip_port
         )
         self.endpoint = pj.Endpoint()
         ep_cfg = pj.EpConfig()
-        ep_cfg.uaConfig.threadCnt = 0
-        ep_cfg.uaConfig.mainThreadOnly = True
+        ep_cfg.uaConfig.threadCnt = thread_cnt
+        # When no worker threads, process everything on the main thread.
+        # With worker threads (e.g. headless AI calls), let PJSIP manage timing.
+        ep_cfg.uaConfig.mainThreadOnly = (thread_cnt == 0)
+
+        # Configure STUN server for NAT traversal
+        if self._stun_server:
+            ep_cfg.uaConfig.stunServer.append(self._stun_server)
+            print(f"STUN server: {self._stun_server}")
+
+        if no_vad:
+            ep_cfg.medConfig.noVad = True
+        if use_sw_clock:
+            ep_cfg.medConfig.sndUseSwClock = True
         self.endpoint.libCreate()
         self.endpoint.libInit(ep_cfg)
         transport_cfg = pj.TransportConfig()
@@ -118,6 +150,22 @@ class VoipSession:
         acc_cfg.sipConfig.authCreds.append(cred)
         if self._sip_proxy:
             acc_cfg.sipConfig.proxies.append(normalize_sip_uri(self._sip_proxy))
+
+        # NAT traversal settings
+        if self._stun_server:
+            acc_cfg.mediaConfig.transportConfig.qosType = pj.PJ_QOS_TYPE_VOICE
+            # Disable ICE to keep SDP compact (avoids "513 Message too big")
+            # We still use STUN for public IP discovery and address rewriting.
+            acc_cfg.natConfig.iceEnabled = False
+            # Use STUN for NAT type detection and address discovery
+            acc_cfg.natConfig.sipStunUse = pj.PJSUA_STUN_USE_DEFAULT
+            acc_cfg.natConfig.mediaStunUse = pj.PJSUA_STUN_USE_DEFAULT
+            # Rewrite headers/SDP to use public IP discovered via STUN
+            acc_cfg.natConfig.contactRewriteUse = 1
+            acc_cfg.natConfig.viaRewriteUse = 1
+            acc_cfg.natConfig.sdpNatRewriteUse = 1
+            print("NAT traversal: STUN enabled (ICE disabled for compact SDP)")
+
         self.account = VoipAccount(self.endpoint)
         self.account.create(acc_cfg)
         return self.account
@@ -136,6 +184,7 @@ class VoipSession:
         return False
 
     def destroy(self) -> None:
+        """Shut down the PJSIP library and release resources."""
         if self.endpoint is not None:
             try:
                 self.endpoint.libDestroy()

@@ -5,3 +5,10 @@ version = "0.1.0"
 description = "VoIP client using Python and PJSIP (pjsua2)."
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+    "websockets>=12.0",
+    "openai>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["voip_client*"]
