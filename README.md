@@ -50,7 +50,7 @@ voip_client/            # Main package
   voip_dtmf_test.py     # DTMF Test (#125): send DTMF digits, then hang up
   app_phone_call.py     # Normal outbound call: two-way audio, record, hang up on Enter
   app_echo_call.py      # Echo call to any number (hear yourself)
-  app_ai_chatbot_call.py    # Outbound call with AI bot (Whisper STT + Chat Completions + TTS pipeline)
+  app_ai_chatbot_call.py    # Outbound call with AI ChatBot (Whisper STT + Chat Completions + TTS pipeline)
   app_ai_realtime_call.py   # Outbound call with AI assistant via OpenAI Realtime API (full-duplex WebSocket)
 ```
 
@@ -58,7 +58,7 @@ voip_client/            # Main package
 
 - **pjsip_*** – PJSIP tests (no SIP account, or registration only): `pjsip_test`, `pjsip_test_voip`, `pjsip_test_audio`. Shared helper: `pjsip_common.PjsipEndpoint`, `PjsipAudioTest`.
 - **voip_*** – Provider test scripts (VoIPstudio test numbers #123, #124, #125). Use `voip_common` (VoipSession, BaseVoipCall). Call classes: `VoipTestCall`, `VoipEchoTestCall`, `VoipDtmfTestCall`.
-- **app_*** – Application scripts (outbound calls to any number). Use `voip_common`. Call classes: `PhoneCall`, `AppEchoCall`, `AiBotCall`, `AiRtCall`.
+- **app_*** – Application scripts (outbound calls to any number). Use `voip_common`. Call classes: `PhoneCall`, `AppEchoCall`, `AiChatBotCall`, `AiRealtimeCall`.
 
 ## Usage
 
@@ -118,6 +118,30 @@ Example with custom duration:
 python -m voip_client.pjsip_test_audio --duration 30
 ```
 
+### VoIPstudio test cases (Test Call, Echo Test, DTMF Test)
+
+VoIPstudio provides test numbers: **#123** (Test Call), **#124** (Echo Test), **#125** (DTMF Test). Default destinations are 123, 124, 125; override with `SIP_TEST_CALL_EXTENSION`, `SIP_ECHO_EXTENSION`, or `SIP_DTMF_TEST_EXTENSION` in `.env` or by passing a destination argument.
+
+**Test Call (#123):** Call test number, connect audio, recording to `recordings/`, Enter to hang up.
+
+```bash
+python -m voip_client.voip_test_call [destination]
+```
+
+**Echo Test (#124):** Call echo number, hear your voice echoed back, recording to `recordings/`, optional `--duration` to auto-hangup (default: 5s).
+
+```bash
+python -m voip_client.voip_echo_test [destination] [--duration SECS]
+```
+
+**DTMF Test (#125):** Call DTMF test number, send a sequence of digits, then hang up.
+
+```bash
+python -m voip_client.voip_dtmf_test [destination] [--digits "1234567890#*"] [--digit-delay-ms MS]
+```
+
+- `--reg-timeout`: Registration timeout in seconds (default: 15) for all of the above.
+
 ### Outbound phone call (two-way audio + recording)
 
 Requires the same `.env` as the VoIPstudio registration test. Calls a phone number (or extension), connects normal two-way audio, records the conversation, and hangs up when you press Enter.
@@ -158,7 +182,7 @@ These should be defined in your local `.env`, based on `.env.example`.
 
 There are two AI call modes:
 
-#### AI Bot (Whisper STT + Chat Completions + TTS)
+#### AI ChatBot (Whisper STT + Chat Completions + TTS)
 
 Uses a pipeline approach: caller audio is transcribed with Whisper, processed by Chat Completions, and the response is converted back to speech with OpenAI TTS. Higher latency but supports any chat model and is more cost-effective.
 
@@ -206,30 +230,6 @@ This script:
 - Sends a short test prompt to the chat completions API
 - Prints the assistant reply or a detailed error (for example, insufficient quota)
 
-### VoIPstudio test cases (Test Call, Echo Test, DTMF Test)
-
-VoIPstudio provides test numbers: **#123** (Test Call), **#124** (Echo Test), **#125** (DTMF Test). Default destinations are 123, 124, 125; override with `SIP_TEST_CALL_EXTENSION`, `SIP_ECHO_EXTENSION`, or `SIP_DTMF_TEST_EXTENSION` in `.env` or by passing a destination argument.
-
-**Test Call (#123):** Call test number, connect audio, recording to `recordings/`, Enter to hang up.
-
-```bash
-python -m voip_client.voip_test_call [destination]
-```
-
-**Echo Test (#124):** Call echo number, hear your voice echoed back, recording to `recordings/`, optional `--duration` to auto-hangup (default: 5s).
-
-```bash
-python -m voip_client.voip_echo_test [destination] [--duration SECS]
-```
-
-**DTMF Test (#125):** Call DTMF test number, send a sequence of digits, then hang up.
-
-```bash
-python -m voip_client.voip_dtmf_test [destination] [--digits "1234567890#*"] [--digit-delay-ms MS]
-```
-
-- `--reg-timeout`: Registration timeout in seconds (default: 15) for all of the above.
-
 ## Test checklist
 
 Use this checklist to track which scripts have been manually tested after changes. Order: pjsip, then voip, then app scripts. Commands below use default options (no `--debug`); test scripts (pjsip_*, voip_*_test) print trace output by default. For troubleshooting app scripts, use `--debug` to write event logs to `recordings/`.
@@ -243,7 +243,7 @@ Use this checklist to track which scripts have been manually tested after change
 - [ ] `python -m voip_client.openai_test` – OpenAI connectivity test
 - [ ] `python -m voip_client.app_phone_call <phone_number>` – Outbound phone call (two-way audio + recording)
 - [ ] `python -m voip_client.app_echo_call <phone_number>` – Echo call application
-- [ ] `python -m voip_client.app_ai_chatbot_call <phone_number>` – Outbound call with AI bot (Whisper + Chat + TTS)
+- [ ] `python -m voip_client.app_ai_chatbot_call <phone_number>` – Outbound call with AI ChatBot (Whisper + Chat + TTS)
 - [ ] `python -m voip_client.app_ai_realtime_call <phone_number>` – Outbound call with Realtime AI assistant
 
 ## Development
@@ -256,4 +256,4 @@ Run from the project root with the virtual environment activated (see Setup abov
 - **docs/PJSIP_macOS.md**, **docs/PJSIP_Linux.md**, **docs/PJSIP_Windows.md** – Platform-specific PJSIP install
 - **docs/VoIPstudio.md** – VoIPstudio SIP settings and mapping to PJSIP
 - **docs/OpenAI_API.md** – AI Assistant architecture (Whisper pipeline and Realtime API), env vars, usage
-- **docs/AI_Assistant.md** – AI bot call: recording, transcription, sample rate, testing
+- **docs/AI_Assistant.md** – AI ChatBot call: recording, transcription, sample rate, testing

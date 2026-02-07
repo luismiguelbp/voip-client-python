@@ -146,7 +146,7 @@ def _resample_pcm(pcm_data: bytes, src_rate: int, dst_rate: int) -> bytes:
     return struct.pack(f"<{out_len}h", *out_samples)
 
 
-class AiRtCall(BaseVoipCall):
+class AiRealtimeCall(BaseVoipCall):
     """
     Outbound call whose remote party talks to an AI via OpenAI Realtime API.
 
@@ -234,9 +234,9 @@ class AiRtCall(BaseVoipCall):
                 dest_path = self._recordings_dir / f"full_call_{int(time.time())}.wav"
                 try:
                     shutil.copy2(self._recording_path, dest_path)
-                    print(f"[AiRtCall] Saved full call recording: {dest_path}")
+                    print(f"[AiRealtimeCall] Saved full call recording: {dest_path}")
                 except Exception as exc:
-                    print(f"[AiRtCall] Failed to save recording: {exc}")
+                    print(f"[AiRealtimeCall] Failed to save recording: {exc}")
 
         super()._cleanup_media()
 
@@ -309,12 +309,12 @@ class AiRtCall(BaseVoipCall):
                 # Get the model name from the bridge for logging
                 model_name = getattr(self._bridge, "_model", "unknown")
                 print(
-                    f"[AiRtCall] Media ready: sample_rate={self._sample_rate}, "
+                    f"[AiRealtimeCall] Media ready: sample_rate={self._sample_rate}, "
                     f"recording={self._recording_path}, model={model_name}"
                 )
                 self._debug_log("media_ready", f"sample_rate={self._sample_rate} model={model_name}")
             except Exception as exc:
-                print(f"[AiRtCall] Failed to set up media: {exc}")
+                print(f"[AiRealtimeCall] Failed to set up media: {exc}")
                 return
 
             self._media_setup_done = True
@@ -355,13 +355,13 @@ class AiRtCall(BaseVoipCall):
         
         if needs_file_to_call_resampling:
             print(
-                f"[AiRtCall] Sample rate mismatch detected: "
+                f"[AiRealtimeCall] Sample rate mismatch detected: "
                 f"call_stream={call_sample_rate}Hz, file={file_sample_rate}Hz, "
                 f"will resample file audio to match call stream rate"
             )
         if needs_call_to_openai_resampling:
             print(
-                f"[AiRtCall] Upsampling audio from {call_sample_rate}Hz to {openai_sample_rate}Hz for OpenAI API"
+                f"[AiRealtimeCall] Upsampling audio from {call_sample_rate}Hz to {openai_sample_rate}Hz for OpenAI API"
             )
 
         # Bytes per frame: 20 ms of PCM16 mono at file sample rate
@@ -391,7 +391,7 @@ class AiRtCall(BaseVoipCall):
                 # Continue draining briefly after _io_stop is set to catch late-arriving audio
                 if self._io_stop.is_set() and not drain_after_stop:
                     drain_after_stop = True
-                    print("[AiRtCall] I/O stop requested, continuing to drain pending audio...")
+                    print("[AiRealtimeCall] I/O stop requested, continuing to drain pending audio...")
                 
                 if drain_after_stop:
                     drain_after_stop_count += 1
@@ -447,7 +447,7 @@ class AiRtCall(BaseVoipCall):
                                 self._bridge.send_pcm(frame_at_openai_rate)
                                 frames_sent += 1
                                 if frames_sent == 1:
-                                    print(f"[AiRtCall] Started sending audio to bridge (frame_size={len(frame_at_openai_rate)} bytes @ {openai_sample_rate}Hz)")
+                                    print(f"[AiRealtimeCall] Started sending audio to bridge (frame_size={len(frame_at_openai_rate)} bytes @ {openai_sample_rate}Hz)")
                     leftover = raw[n_full:]
 
                 # --- Response: continuously drain bridge output ---
@@ -463,7 +463,7 @@ class AiRtCall(BaseVoipCall):
                         got_chunk_this_iteration = True
                         drain_iterations = 0  # Reset counter when we get audio
                         if len(accumulated_response) <= 24000:  # Log first ~0.5 seconds
-                            print(f"[AiRtCall] Accumulating audio: +{len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
+                            print(f"[AiRealtimeCall] Accumulating audio: +{len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
                     else:
                         drain_iterations += 1
                         if drain_iterations >= 5:  # Stop after 5 empty checks
@@ -504,7 +504,7 @@ class AiRtCall(BaseVoipCall):
                                 (response_pcm_bytes, response_counter), timeout=0.1
                             )
                             reason = "response complete" if response_complete else f"timeout ({current_time - last_audio_time:.2f}s)"
-                            print(f"[AiRtCall] Queued response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz, {reason})")
+                            print(f"[AiRealtimeCall] Queued response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz, {reason})")
                             self._debug_log("response_queued", f"index={response_counter} bytes={len(response_pcm_bytes)} {reason}")
                             response_counter += 1
                             accumulated_response.clear()
@@ -514,7 +514,7 @@ class AiRtCall(BaseVoipCall):
                                 self._bridge._response_done.clear()
                         except Exception as exc:
                             # Best-effort; drop response on failure.
-                            print(f"[AiRtCall] Failed to queue response: {exc}")
+                            print(f"[AiRealtimeCall] Failed to queue response: {exc}")
                             accumulated_response.clear()
                             last_audio_time = None
                             if self._bridge:
@@ -528,7 +528,7 @@ class AiRtCall(BaseVoipCall):
             # Wait a bit longer to catch late-arriving audio after call ends
             if self._bridge:
                 self._debug_log("flush_start", "")
-                print("[AiRtCall] Flushing remaining audio from bridge...")
+                print("[AiRealtimeCall] Flushing remaining audio from bridge...")
                 # First, drain any immediately available chunks
                 drained_any = False
                 for _ in range(100):  # Try up to 100 times (non-blocking)
@@ -536,14 +536,14 @@ class AiRtCall(BaseVoipCall):
                     if chunk:
                         accumulated_response.extend(chunk)
                         drained_any = True
-                        print(f"[AiRtCall] Draining final chunk: {len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
+                        print(f"[AiRealtimeCall] Draining final chunk: {len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
                     else:
                         break
                 
                 # Wait for bridge to finish receiving events
                 # The bridge thread might still be processing events asynchronously
                 bridge_thread_running = self._bridge._thread and self._bridge._thread.is_alive()
-                print(f"[AiRtCall] Bridge thread running: {bridge_thread_running}, waiting for audio...")
+                print(f"[AiRealtimeCall] Bridge thread running: {bridge_thread_running}, waiting for audio...")
                 
                 # Wait for late-arriving audio; shorten wait if no audio ever received (e.g. 603 Declined)
                 max_wait_iterations = 60  # Up to 3 seconds when we might get audio
@@ -555,27 +555,27 @@ class AiRtCall(BaseVoipCall):
                         accumulated_response.extend(chunk)
                         drained_any = True
                         consecutive_empty_checks = 0
-                        print(f"[AiRtCall] Got trailing chunk: {len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
+                        print(f"[AiRealtimeCall] Got trailing chunk: {len(chunk)} bytes (total: {len(accumulated_response)} bytes)")
                     else:
                         consecutive_empty_checks += 1
                     
                     if self._bridge._response_done.is_set() and consecutive_empty_checks >= 5:
-                        print("[AiRtCall] Response done, no more audio expected")
+                        print("[AiRealtimeCall] Response done, no more audio expected")
                         break
                     
                     if i >= 20 and not bridge_thread_running and consecutive_empty_checks >= 10:
-                        print("[AiRtCall] Bridge thread stopped, no more audio expected")
+                        print("[AiRealtimeCall] Bridge thread stopped, no more audio expected")
                         break
                     
                     # If call ended very quickly and we still have no audio after 1.5s, stop waiting
                     if i >= 30 and not accumulated_response:
-                        print("[AiRtCall] No audio received after 1.5s (call may have been declined/short), stopping flush wait")
+                        print("[AiRealtimeCall] No audio received after 1.5s (call may have been declined/short), stopping flush wait")
                         break
                     
                     if i % 10 == 0:
                         bridge_thread_running = self._bridge._thread and self._bridge._thread.is_alive()
                         if bridge_thread_running:
-                            print(f"[AiRtCall] Still waiting for audio (iteration {i}/{max_wait_iterations})...")
+                            print(f"[AiRealtimeCall] Still waiting for audio (iteration {i}/{max_wait_iterations})...")
                 
                 # Flush any accumulated audio
                 if accumulated_response:
@@ -588,12 +588,12 @@ class AiRtCall(BaseVoipCall):
                         self._pending_responses.put(
                             (response_pcm_bytes, response_counter), timeout=0.1
                         )
-                        print(f"[AiRtCall] Flushed final response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz)")
+                        print(f"[AiRealtimeCall] Flushed final response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz)")
                         self._debug_log("flush_end", f"flushed_bytes={len(response_pcm_bytes)}")
                     except Exception as exc:
-                        print(f"[AiRtCall] Failed to flush final response: {exc}")
+                        print(f"[AiRealtimeCall] Failed to flush final response: {exc}")
                 else:
-                    print("[AiRtCall] No audio to flush")
+                    print("[AiRealtimeCall] No audio to flush")
                     self._debug_log("flush_end", "no_audio")
             f.close()
 
@@ -606,7 +606,7 @@ class AiRtCall(BaseVoipCall):
         _write_wav(wav_path, pcm, self._sample_rate)
 
         duration_s = len(pcm) / (self._sample_rate * 2)
-        print(f"[AiRtCall] Playing response {index} ({duration_s:.1f}s)")
+        print(f"[AiRealtimeCall] Playing response {index} ({duration_s:.1f}s)")
         self._debug_log("response_play_start", f"index={index} duration_s={duration_s:.2f}")
 
         try:
@@ -626,7 +626,7 @@ class AiRtCall(BaseVoipCall):
                 pass
             del player
         except Exception as exc:
-            print(f"[AiRtCall] Playback error: {exc}")
+            print(f"[AiRealtimeCall] Playback error: {exc}")
 
         self._debug_log("response_play_end", f"index={index}")
         # Save response file if requested, otherwise clean up
@@ -635,7 +635,7 @@ class AiRtCall(BaseVoipCall):
                 dest_path = self._recordings_dir / f"response_{index:03d}.wav"
                 shutil.copy2(wav_path, dest_path)
             except Exception as exc:
-                print(f"[AiRtCall] Failed to save response {index}: {exc}")
+                print(f"[AiRealtimeCall] Failed to save response {index}: {exc}")
         
         # Clean up the temporary response file (always delete from tmp/)
         try:
@@ -687,7 +687,7 @@ def run_call(
 
         dest_uri = session.build_uri(phone_number)
         print(f"Calling {dest_uri} (AI Realtime) ...")
-        call = AiRtCall(
+        call = AiRealtimeCall(
             session.account,
             system_message=system_message,
             voice=voice,
@@ -707,9 +707,9 @@ def run_call(
                 call._debug_file = open(log_path, "w", encoding="utf-8")
                 call._debug_lock = threading.Lock()
                 call._debug_log("call_started", f"dest={dest_uri}")
-                print(f"[AiRtCall] Debug log: {log_path}")
+                print(f"[AiRealtimeCall] Debug log: {log_path}")
             except Exception as e:
-                print(f"[AiRtCall] Could not open debug log: {e}")
+                print(f"[AiRealtimeCall] Could not open debug log: {e}")
 
         end_requested = threading.Event()
 
@@ -766,7 +766,7 @@ def run_call(
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
         elif save_recordings:
-            print(f"[AiRtCall] Recordings saved to: {_recordings_dir()}")
+            print(f"[AiRealtimeCall] Recordings saved to: {_recordings_dir()}")
 
 
 def main() -> int:
