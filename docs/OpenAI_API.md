@@ -44,15 +44,15 @@ Phone User <--[SIP Audio]--> PJSIP <--[PCM Audio]--> WhisperAssistantBridge
       - `recv_pcm(timeout: float) -> Optional[bytes]` - read PCM16 audio from TTS.
 
 - `voip_client/app_ai_chatbot_call.py`
-  - `AiBotCall(BaseVoipCall)`:
+  - `AiChatBotCall(BaseVoipCall)`:
     - Uses the existing SIP session/account (`VoipSession`, `VoipAccount`).
     - On media active, starts a `WhisperAssistantBridge` and bridges audio between PJSIP and the AI.
-    - Behaves as an **AI Bot**: listens to the caller and maintains a natural back-and-forth conversation until the call ends.
+    - Behaves as an **AI ChatBot**: listens to the caller and maintains a natural back-and-forth conversation until the call ends.
     - Exposes `--silence-duration` CLI flag to control turn-taking (how long to wait after silence before responding).
     - Exposes `--model` CLI flag to choose the chat model (default: `gpt-4o`).
 
 - `voip_client/app_ai_realtime_call.py`
-  - `AiRtCall(BaseVoipCall)`:
+  - `AiRealtimeCall(BaseVoipCall)`:
     - Uses the existing SIP session/account (`VoipSession`, `VoipAccount`).
     - On media active, creates an `OpenAIRealtimeBridge` and bridges audio between PJSIP and OpenAI Realtime.
     - Full-duplex audio over WebSocket with server-side VAD for turn detection.
@@ -78,7 +78,7 @@ export OPENAI_TTS_MODEL="tts-1"
 
 or add them to `.env` (see `.env.example`) and ensure it is loaded before running the scripts.
 
-### Usage: AI Bot call (Whisper pipeline)
+### Usage: AI ChatBot call (Whisper pipeline)
 
 From the project root, with your virtualenv active and PJSIP set up:
 

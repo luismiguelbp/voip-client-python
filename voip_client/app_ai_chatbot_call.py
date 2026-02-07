@@ -84,7 +84,7 @@ def _read_wav_sample_rate(path: Path) -> int:
         return 8000  # fallback to default
 
 
-class AiBotCall(BaseVoipCall):
+class AiChatBotCall(BaseVoipCall):
     """
     Outbound call whose remote party talks to a conversational AI Assistant.
 
@@ -168,9 +168,9 @@ class AiBotCall(BaseVoipCall):
                 dest_path = self._recordings_dir / f"full_call_{int(time.time())}.wav"
                 try:
                     shutil.copy2(self._recording_path, dest_path)
-                    print(f"[AiBotCall] Saved full call recording: {dest_path}")
+                    print(f"[AiChatBotCall] Saved full call recording: {dest_path}")
                 except Exception as exc:
-                    print(f"[AiBotCall] Failed to save recording: {exc}")
+                    print(f"[AiChatBotCall] Failed to save recording: {exc}")
                 
                 # Save full conversation transcript
                 try:
@@ -187,9 +187,9 @@ class AiBotCall(BaseVoipCall):
                                 f.write(f"[USER]: {content}\n\n")
                             elif role == "assistant":
                                 f.write(f"[ASSISTANT]: {content}\n\n")
-                    print(f"[AiBotCall] Saved full transcript: {transcript_path}")
+                    print(f"[AiChatBotCall] Saved full transcript: {transcript_path}")
                 except Exception as exc:
-                    print(f"[AiBotCall] Failed to save transcript: {exc}")
+                    print(f"[AiChatBotCall] Failed to save transcript: {exc}")
 
         super()._cleanup_media()
 
@@ -252,12 +252,12 @@ class AiBotCall(BaseVoipCall):
                 # Get the model name from the bridge for logging
                 model_name = getattr(self._bridge, "_model", "unknown")
                 print(
-                    f"[AiBotCall] Media ready: sample_rate={self._sample_rate}, "
+                    f"[AiChatBotCall] Media ready: sample_rate={self._sample_rate}, "
                     f"recording={self._recording_path}, model={model_name}"
                 )
                 self._debug_log("media_ready", f"sample_rate={self._sample_rate} model={model_name}")
             except Exception as exc:
-                print(f"[AiBotCall] Failed to set up media: {exc}")
+                print(f"[AiChatBotCall] Failed to set up media: {exc}")
                 return
 
             self._media_setup_done = True
@@ -291,7 +291,7 @@ class AiBotCall(BaseVoipCall):
         
         if needs_resampling:
             print(
-                f"[AiBotCall] Sample rate mismatch detected: "
+                f"[AiChatBotCall] Sample rate mismatch detected: "
                 f"call_stream={self._sample_rate}Hz, file={file_sample_rate}Hz, "
                 f"will resample file audio to match call stream rate"
             )
@@ -384,7 +384,7 @@ class AiBotCall(BaseVoipCall):
         _write_wav(wav_path, pcm, self._sample_rate)
 
         duration_s = len(pcm) / (self._sample_rate * 2)
-        print(f"[AiBotCall] Playing response {index} ({duration_s:.1f}s)")
+        print(f"[AiChatBotCall] Playing response {index} ({duration_s:.1f}s)")
         self._debug_log("response_play_start", f"index={index} duration_s={duration_s:.2f}")
 
         try:
@@ -404,7 +404,7 @@ class AiBotCall(BaseVoipCall):
                 pass
             del player
         except Exception as exc:
-            print(f"[AiBotCall] Playback error: {exc}")
+            print(f"[AiChatBotCall] Playback error: {exc}")
 
         self._debug_log("response_play_end", f"index={index}")
         # Save response file if requested, otherwise clean up
@@ -413,7 +413,7 @@ class AiBotCall(BaseVoipCall):
                 dest_path = self._recordings_dir / f"response_{index:03d}.wav"
                 shutil.copy2(wav_path, dest_path)
             except Exception as exc:
-                print(f"[AiBotCall] Failed to save response {index}: {exc}")
+                print(f"[AiChatBotCall] Failed to save response {index}: {exc}")
         
         # Clean up the temporary response file (always delete from tmp/)
         try:
@@ -457,8 +457,8 @@ def run_call(
             return 1
 
         dest_uri = session.build_uri(phone_number)
-        print(f"Calling {dest_uri} (AI Bot - Whisper pipeline) ...")
-        call = AiBotCall(
+        print(f"Calling {dest_uri} (AI ChatBot - Whisper pipeline) ...")
+        call = AiChatBotCall(
             session.account,
             system_message=system_message,
             voice=voice,
@@ -476,9 +476,9 @@ def run_call(
                 call._debug_file = open(log_path, "w", encoding="utf-8")
                 call._debug_lock = threading.Lock()
                 call._debug_log("call_started", f"dest={dest_uri}")
-                print(f"[AiBotCall] Debug log: {log_path}")
+                print(f"[AiChatBotCall] Debug log: {log_path}")
             except Exception as e:
-                print(f"[AiBotCall] Could not open debug log: {e}")
+                print(f"[AiChatBotCall] Could not open debug log: {e}")
 
         end_requested = threading.Event()
 
@@ -493,7 +493,7 @@ def run_call(
             call.process_pending_responses()
             if call.state_confirmed and not prompted:
                 prompted = True
-                print("Call connected to AI Bot. Press Enter to end call.")
+                print("Call connected to AI ChatBot. Press Enter to end call.")
                 t = threading.Thread(target=wait_enter, daemon=True)
                 t.start()
             if end_requested.is_set():
@@ -534,13 +534,13 @@ def run_call(
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
         elif save_recordings:
-            print(f"[AiBotCall] Recordings saved to: {_recordings_dir()}")
+            print(f"[AiChatBotCall] Recordings saved to: {_recordings_dir()}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Make a phone call and attach an AI Bot (Whisper STT + "
+            "Make a phone call and attach an AI ChatBot (Whisper STT + "
             "Chat Completions + OpenAI TTS) to the remote caller."
         )
     )
