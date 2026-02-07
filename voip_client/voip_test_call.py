@@ -1,17 +1,18 @@
 """
-Test Call: call provider test number (#123), connect audio, optional record, hang up on Enter.
+Test Call: call provider test number (#123), connect audio, record to recordings/, hang up on Enter.
 
 Usage:
-    python -m voip_client.voip_test_call [destination] [--output WAV_PATH]
+    python -m voip_client.voip_test_call [destination]
 
+Records to recordings/voip_test_call_YYYYMMDD_HHMMSS.wav.
 Default destination: 123 or SIP_TEST_CALL_EXTENSION in .env.
 """
 
 import os
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 try:
     import pjsua2 as pj
@@ -23,13 +24,9 @@ from voip_client.voip_common import BaseVoipCall, VoipAccount, VoipSession
 
 
 class VoipTestCall(BaseVoipCall):
-    """Test Call (#123): connect audio, optional recording."""
+    """Test Call (#123): connect audio, recording to recordings/."""
 
-    def __init__(
-        self,
-        account: VoipAccount,
-        record_path: Optional[Path],
-    ) -> None:
+    def __init__(self, account: VoipAccount, record_path: Path) -> None:
         super().__init__(account)
         self.record_path = record_path
 
@@ -73,34 +70,51 @@ class VoipTestCall(BaseVoipCall):
             self._cap_med = cap_med
             self._aud_med = aud_med
             self._connect_audio_to_call(aud_med, cap_med, play_med)
-            if self.record_path is not None:
-                try:
-                    self._recorder = pj.AudioMediaRecorder()
-                    self._recorder.createRecorder(str(self.record_path))
-                    self._cap_med.startTransmit(self._recorder)
-                    self._aud_med.startTransmit(self._recorder)
-                    print(f"Recording to: {self.record_path}")
-                except Exception as e:
-                    print(f"Could not start recorder: {e}")
+            print("[trace] media active")
+            try:
+                self._recorder = pj.AudioMediaRecorder()
+                self._recorder.createRecorder(str(self.record_path))
+                self._cap_med.startTransmit(self._recorder)
+                self._aud_med.startTransmit(self._recorder)
+                print(f"[trace] recording started: {self.record_path}")
+                print(f"Recording to: {self.record_path}")
+            except Exception as e:
+                print(f"Could not start recorder: {e}")
             self._media_setup_done = True
             break
 
 
+def _recordings_dir() -> Path:
+    """Return (and create) recordings/ under the project root."""
+    d = Path(__file__).resolve().parent.parent / "recordings"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_default_record_path() -> Path:
+    """Timestamped WAV path in recordings/."""
+    return _recordings_dir() / f"voip_test_call_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+
+
 def run_test_call(
     destination: str,
-    record_path: Optional[Path],
+    record_path: Path,
     reg_timeout: int,
 ) -> int:
     session = VoipSession()
     try:
+        print("[trace] creating endpoint and account")
         session.create_endpoint()
         session.create_account()
+        print(f"[trace] waiting for registration (timeout={reg_timeout}s)")
         if not session.wait_registration(reg_timeout):
             print("Registration timed out")
             return 1
+        print("[trace] registration OK")
 
         dest_uri = session.build_uri(destination)
         print(f"Calling {dest_uri} ...")
+        print("[trace] placing call")
         call = VoipTestCall(session.account, record_path)
         call_op = pj.CallOpParam(True)
         call.makeCall(dest_uri, call_op)
@@ -116,6 +130,7 @@ def run_test_call(
             session.endpoint.libHandleEvents(50)
             if call.state_confirmed and not prompted:
                 prompted = True
+                print("[trace] call connected")
                 print("Call connected. Press Enter to end call.")
                 t = threading.Thread(target=wait_enter, daemon=True)
                 t.start()
@@ -126,7 +141,8 @@ def run_test_call(
         while not call.disconnected:
             session.endpoint.libHandleEvents(50)
 
-        if record_path and record_path.exists():
+        print("[trace] call disconnected")
+        if record_path.exists():
             size_kb = record_path.stat().st_size / 1024
             print(f"Recording saved: {record_path} ({size_kb:.1f} KB)")
         return 0
@@ -148,7 +164,7 @@ def main() -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Test Call: call test number (#123), optional recording, Enter to hang up"
+        description="Test Call: call test number (#123), recording to recordings/, Enter to hang up"
     )
     parser.add_argument(
         "destination",
@@ -156,13 +172,6 @@ def main() -> int:
         nargs="?",
         default=None,
         help="Destination extension (default: 123 or SIP_TEST_CALL_EXTENSION)",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=str,
-        default=None,
-        help="Path to save call recording",
     )
     parser.add_argument(
         "--reg-timeout",
@@ -173,10 +182,7 @@ def main() -> int:
     args = parser.parse_args()
 
     destination = args.destination or os.getenv("SIP_TEST_CALL_EXTENSION", "123")
-    record_path = Path(args.output) if args.output else None
-    if record_path and record_path.parent and not record_path.parent.exists():
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-
+    record_path = get_default_record_path()
     return run_test_call(destination, record_path, args.reg_timeout)
 
 

@@ -59,6 +59,7 @@ class VoipDtmfTestCall(BaseVoipCall):
             self._connect_audio_to_call(aud_med, cap_med, play_med)
             self._media_setup_done = True
             self.media_ready = True
+            print("[trace] media active, DTMF ready")
             break
 
 
@@ -70,14 +71,18 @@ def run_dtmf_test(
 ) -> int:
     session = VoipSession()
     try:
+        print("[trace] creating endpoint and account")
         session.create_endpoint()
         session.create_account()
+        print(f"[trace] waiting for registration (timeout={reg_timeout}s)")
         if not session.wait_registration(reg_timeout):
             print("Registration timed out")
             return 1
+        print("[trace] registration OK")
 
         dest_uri = session.build_uri(destination)
         print(f"Calling {dest_uri} ...")
+        print("[trace] placing call")
         call = VoipDtmfTestCall(session.account, digits, digit_delay_ms)
         call_op = pj.CallOpParam(True)
         call.makeCall(dest_uri, call_op)
@@ -126,6 +131,7 @@ def run_dtmf_test(
         while not call.disconnected:
             session.endpoint.libHandleEvents(50)
 
+        print("[trace] call disconnected")
         print("DTMF test complete.")
         return 0
     except ValueError as exc:

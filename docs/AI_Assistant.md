@@ -1,4 +1,6 @@
-# AI Bot Call – Recording and Transcription
+# AI ChatBot Call – Recording and Transcription
+
+When using `--save-recordings`, files are written under `recordings/app_ai_chatbot_call_<timestamp>/`.
 
 ## Behavior
 
@@ -10,7 +12,7 @@
 ## Relevant files
 
 - `voip_client/whisper_assistant.py`: Transcription saving; `_resample_pcm()` with anti-aliasing.
-- `voip_client/app_ai_bot_call.py`: Sample rate handling, full transcript on cleanup, sample rate logging.
+- `voip_client/app_ai_chatbot_call.py`: Sample rate handling, full transcript on cleanup, sample rate logging.
 
 ## Testing
 
@@ -23,3 +25,4 @@
 - If segments sound bad: check audio buffer handling.
 - If response quality is poor: try better TTS or TTS at closer sample rates.
 - Port cleanup warnings: optional improvements with delays or sync for port removal.
+

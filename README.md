@@ -32,7 +32,7 @@ source .venv/bin/activate
 
 Never commit `.env`. Copy from `.env.example` and fill in real values only locally. `.env` is listed in `.gitignore`.
 
-Logs are written to `logs/`, recordings to `recordings/`; both directories are local and gitignored.
+Logs are written to `logs/`, recordings to `recordings/`, and temporary files to `tmp/`; these directories are local and gitignored.
 
 All commands below assume you are in the project root with the virtual environment activated.
 
@@ -45,13 +45,13 @@ voip_client/            # Main package
   pjsip_test.py         # PJSIP install/basic test
   pjsip_test_voip.py    # VoIPstudio registration test
   pjsip_test_audio.py   # PJSIP audio test: devices, loopback, record (no SIP)
+  voip_test_call.py     # Test Call (#123): connect, record to recordings/, Enter to hang up
+  voip_echo_test.py     # Echo Test (#124): hear echo, record to recordings/, optional --duration
+  voip_dtmf_test.py     # DTMF Test (#125): send DTMF digits, then hang up
   app_phone_call.py     # Normal outbound call: two-way audio, record, hang up on Enter
   app_echo_call.py      # Echo call to any number (hear yourself)
-  app_ai_bot_call.py    # Outbound call with AI bot (Whisper STT + Chat Completions + TTS pipeline)
-  app_ai_rt_call.py     # Outbound call with AI assistant via OpenAI Realtime API (full-duplex WebSocket)
-  voip_test_call.py     # Test Call (#123): connect, optional record, Enter to hang up
-  voip_echo_test.py     # Echo Test (#124): hear echo, optional record/duration
-  voip_dtmf_test.py     # DTMF Test (#125): send DTMF digits, then hang up
+  app_ai_chatbot_call.py    # Outbound call with AI bot (Whisper STT + Chat Completions + TTS pipeline)
+  app_ai_realtime_call.py   # Outbound call with AI assistant via OpenAI Realtime API (full-duplex WebSocket)
 ```
 
 ### Naming conventions
@@ -107,11 +107,10 @@ Test PJSIP audio: list devices, loopback (hear yourself), and save a recording. 
 python -m voip_client.pjsip_test_audio
 ```
 
-Recordings are saved to `recordings/pjsip_test_audio_YYYYMMDD_HHMMSS.wav` by default.
+Recordings are saved to `recordings/pjsip_test_audio_YYYYMMDD_HHMMSS.wav`.
 
 Options:
 - `--duration`, `-d`: Test duration in seconds (default: 5)
-- `--output`, `-o`: Custom output WAV file path
 
 Example with custom duration:
 
@@ -124,22 +123,26 @@ python -m voip_client.pjsip_test_audio --duration 30
 Requires the same `.env` as the VoIPstudio registration test. Calls a phone number (or extension), connects normal two-way audio, records the conversation, and hangs up when you press Enter.
 
 ```bash
-python -m voip_client.app_phone_call <phone_number> [--output WAV_PATH]
+python -m voip_client.app_phone_call <phone_number>
 ```
 
 - `phone_number`: Destination number or extension (e.g. `0035123456789` or an extension).
-- `--output`, `-o`: Output WAV file path (default: `recordings/app_phone_call_YYYYMMDD_HHMMSS.wav`).
+- Recording saved to `recordings/app_phone_call_YYYYMMDD_HHMMSS.wav`.
 - `--reg-timeout`: Registration timeout in seconds (default: 15).
+- `--debug`: Write event log to `recordings/app_phone_call_debug_<ts>.log` for debugging.
 
 When the call is connected, the script prints "Call connected. Press Enter to end call and save recording." Press Enter to hang up; the recording is saved automatically.
 
 ### Echo call (outbound)
 
-Call any number and hear yourself (mic routed to speaker). Same `.env` as registration test. Optional `--duration` and `--output` for recording.
+Call any number and hear yourself (mic routed to speaker). Same `.env` as registration test. Recording saved to `recordings/app_echo_call_YYYYMMDD_HHMMSS.wav`. Optional `--duration` to auto-hangup (default: 5s).
 
 ```bash
-python -m voip_client.app_echo_call <phone_number> [--duration SECS] [--output WAV_PATH]
+python -m voip_client.app_echo_call <phone_number> [--duration SECS]
 ```
+
+- `--duration`, `-d`: Auto-hangup after N seconds (default: 5).
+- `--debug`: Write event log to `recordings/app_echo_call_debug_<ts>.log` for debugging.
 
 ### Outbound phone call with AI assistant
 
@@ -160,7 +163,7 @@ There are two AI call modes:
 Uses a pipeline approach: caller audio is transcribed with Whisper, processed by Chat Completions, and the response is converted back to speech with OpenAI TTS. Higher latency but supports any chat model and is more cost-effective.
 
 ```bash
-python -m voip_client.app_ai_bot_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
+python -m voip_client.app_ai_chatbot_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
 ```
 
 - `phone_number`: Destination number or extension.
@@ -169,13 +172,14 @@ python -m voip_client.app_ai_bot_call <phone_number> [--reg-timeout SECONDS] [--
 - `--voice`: OpenAI TTS voice name (default: `alloy`).
 - `--model`: Chat model to use (default: `gpt-4o`).
 - `--silence-duration`: How long (ms) to wait after silence before responding (default: 1000).
+- `--debug`: Write event log to `recordings/app_ai_chatbot_call_debug_<ts>.log` for debugging call flow.
 
 #### AI Realtime (OpenAI Realtime API)
 
 Uses the OpenAI Realtime API for full-duplex audio over WebSocket. Lower latency with server-side VAD for turn detection.
 
 ```bash
-python -m voip_client.app_ai_rt_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
+python -m voip_client.app_ai_realtime_call <phone_number> [--reg-timeout SECONDS] [--system-message TEXT] [--voice VOICE_NAME] [--model MODEL] [--silence-duration MS]
 ```
 
 - `phone_number`: Destination number or extension.
@@ -186,6 +190,7 @@ python -m voip_client.app_ai_rt_call <phone_number> [--reg-timeout SECONDS] [--s
 - `--silence-duration`: How long (ms) server VAD waits after silence (default: 1000).
 - `--vad-threshold`: Server VAD activation threshold, 0.0-1.0 (default: 0.5).
 - `--prefix-padding`: Audio to include before detected speech, in ms (default: 300).
+- `--debug`: Write event log to `recordings/app_ai_realtime_call_debug_<ts>.log` for debugging (see docs/OpenAI_API.md).
 
 ### OpenAI connectivity test script
 
@@ -205,16 +210,16 @@ This script:
 
 VoIPstudio provides test numbers: **#123** (Test Call), **#124** (Echo Test), **#125** (DTMF Test). Default destinations are 123, 124, 125; override with `SIP_TEST_CALL_EXTENSION`, `SIP_ECHO_EXTENSION`, or `SIP_DTMF_TEST_EXTENSION` in `.env` or by passing a destination argument.
 
-**Test Call (#123):** Call test number, connect audio, optional recording, Enter to hang up.
+**Test Call (#123):** Call test number, connect audio, recording to `recordings/`, Enter to hang up.
 
 ```bash
-python -m voip_client.voip_test_call [destination] [--output WAV_PATH]
+python -m voip_client.voip_test_call [destination]
 ```
 
-**Echo Test (#124):** Call echo number, hear your voice echoed back, optional recording and/or `--duration` to auto-hangup.
+**Echo Test (#124):** Call echo number, hear your voice echoed back, recording to `recordings/`, optional `--duration` to auto-hangup (default: 5s).
 
 ```bash
-python -m voip_client.voip_echo_test [destination] [--duration SECS] [--output WAV_PATH]
+python -m voip_client.voip_echo_test [destination] [--duration SECS]
 ```
 
 **DTMF Test (#125):** Call DTMF test number, send a sequence of digits, then hang up.
@@ -227,19 +232,19 @@ python -m voip_client.voip_dtmf_test [destination] [--digits "1234567890#*"] [--
 
 ## Test checklist
 
-Use this checklist to track which scripts have been manually tested after changes:
+Use this checklist to track which scripts have been manually tested after changes. Order: pjsip, then voip, then app scripts. Commands below use default options (no `--debug`); test scripts (pjsip_*, voip_*_test) print trace output by default. For troubleshooting app scripts, use `--debug` to write event logs to `recordings/`.
 
 - [ ] `python -m voip_client.pjsip_test` – PJSIP install/basic test
 - [ ] `python -m voip_client.pjsip_test_voip` – VoIPstudio registration test
 - [ ] `python -m voip_client.pjsip_test_audio` – PJSIP audio (devices/loopback/record) test
-- [ ] `python -m voip_client.app_phone_call <phone_number>` – Outbound phone call (two-way audio + recording)
-- [ ] `python -m voip_client.app_echo_call <phone_number>` – Echo call application
 - [ ] `python -m voip_client.voip_test_call [destination]` – VoIPstudio Test Call (#123)
 - [ ] `python -m voip_client.voip_echo_test [destination]` – VoIPstudio Echo Test (#124)
 - [ ] `python -m voip_client.voip_dtmf_test [destination]` – VoIPstudio DTMF Test (#125)
 - [ ] `python -m voip_client.openai_test` – OpenAI connectivity test
-- [ ] `python -m voip_client.app_ai_bot_call <phone_number>` – Outbound call with AI bot (Whisper + Chat + TTS)
-- [ ] `python -m voip_client.app_ai_rt_call <phone_number>` – Outbound call with Realtime AI assistant
+- [ ] `python -m voip_client.app_phone_call <phone_number>` – Outbound phone call (two-way audio + recording)
+- [ ] `python -m voip_client.app_echo_call <phone_number>` – Echo call application
+- [ ] `python -m voip_client.app_ai_chatbot_call <phone_number>` – Outbound call with AI bot (Whisper + Chat + TTS)
+- [ ] `python -m voip_client.app_ai_realtime_call <phone_number>` – Outbound call with Realtime AI assistant
 
 ## Development
 

@@ -4,7 +4,9 @@ PJSIP Audio Test
 Tests PJSIP audio devices (no SIP/account): list devices, loopback (mic to speakers), record to WAV.
 
 Usage:
-    python -m voip_client.pjsip_test_audio [--duration SECONDS] [--output FILENAME]
+    python -m voip_client.pjsip_test_audio [--duration SECONDS]
+
+Records to recordings/pjsip_test_audio_YYYYMMDD_HHMMSS.wav.
 """
 
 import argparse
@@ -69,6 +71,7 @@ class PjsipAudioTest:
             aud_dev_mgr = ep.audDevManager()
             aud_dev_mgr.refreshDevs()
 
+            print("[trace] starting loopback and recorder")
             print(f"\n=== Starting Audio Test ({duration} seconds) ===")
             print("Speak into your microphone - you should hear yourself through speakers.")
             print(f"Recording to: {output_file}")
@@ -96,6 +99,7 @@ class PjsipAudioTest:
             capture_media.stopTransmit(playback_media)
             capture_media.stopTransmit(self._recorder)
 
+            print("[trace] stopping loopback and recorder")
             print(f"\n\n=== Audio Test Complete ===")
             print(f"Recording saved to: {output_file}")
 
@@ -136,7 +140,9 @@ def run_pjsip_audio_test(duration: int, output_file: Path) -> int:
     """Create endpoint, run PJSIP audio test, destroy. Returns 0 on success, 1 on failure."""
     ep = PjsipEndpoint()
     try:
+        print("[trace] creating endpoint")
         ep.create()
+        print("[trace] endpoint created")
         print("PJSIP initialized successfully")
 
         test = PjsipAudioTest(ep)
@@ -144,6 +150,7 @@ def run_pjsip_audio_test(duration: int, output_file: Path) -> int:
 
         return test.run(duration, output_file)
     finally:
+        print("[trace] destroying endpoint")
         ep.destroy()
 
 
@@ -157,18 +164,9 @@ def main() -> int:
         default=5,
         help="Test duration in seconds (default: 5)"
     )
-    parser.add_argument(
-        "--output", "-o",
-        type=str,
-        default=None,
-        help="Output WAV file path (default: recordings/pjsip_test_audio_YYYYMMDD_HHMMSS.wav)"
-    )
     args = parser.parse_args()
 
-    output_path = Path(args.output) if args.output else get_default_output_path()
-    if output_path.parent and not output_path.parent.exists():
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
+    output_path = get_default_output_path()
     return run_pjsip_audio_test(args.duration, output_path)
 
 

@@ -2,10 +2,9 @@
 Normal outbound phone call with conversation recording.
 
 Usage:
-    python -m voip_client.app_phone_call <phone_number> [--output WAV_PATH]
+    python -m voip_client.app_phone_call <phone_number>
 
-Records both sides of the call (microphone + remote) to a WAV file.
-By default saves in the recordings folder (recordings/app_phone_call_YYYYMMDD_HHMMSS.wav).
+Records both sides of the call (microphone + remote) to recordings/app_phone_call_YYYYMMDD_HHMMSS.wav.
 Press Enter to hang up and save the recording.
 
 Requires .env with SIP_DOMAIN, SIP_USERNAME, SIP_PASSWORD.
@@ -13,8 +12,9 @@ Requires .env with SIP_DOMAIN, SIP_USERNAME, SIP_PASSWORD.
 
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 try:
     import pjsua2 as pj
@@ -28,11 +28,33 @@ from voip_client.voip_common import BaseVoipCall, VoipAccount, VoipSession
 class PhoneCall(BaseVoipCall):
     """Outbound call with bidirectional audio and recording."""
 
-    def __init__(self, account: VoipAccount, record_path: Path) -> None:
+    def __init__(
+        self,
+        account: VoipAccount,
+        record_path: Path,
+        debug_file=None,
+        debug_lock: Optional[threading.Lock] = None,
+    ) -> None:
         super().__init__(account)
         self.record_path = record_path
+        self._debug_file = debug_file
+        self._debug_lock = debug_lock
+
+    def _debug_log(self, event: str, detail: str = "") -> None:
+        """Write a timestamped event line to the debug log file if --debug was used."""
+        if not self._debug_file or not self._debug_lock:
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        line = f"{ts} {event} {detail}\n"
+        try:
+            with self._debug_lock:
+                self._debug_file.write(line)
+                self._debug_file.flush()
+        except Exception:
+            pass
 
     def _cleanup_media(self) -> None:
+        self._debug_log("call_disconnected", "")
         if self._recorder is not None:
             try:
                 if self._cap_med is not None:
@@ -77,6 +99,7 @@ class PhoneCall(BaseVoipCall):
                 self._recorder.createRecorder(str(self.record_path))
                 self._cap_med.startTransmit(self._recorder)
                 self._aud_med.startTransmit(self._recorder)
+                self._debug_log("media_ready", f"record_path={self.record_path}")
                 print(f"Recording to: {self.record_path}")
             except Exception as e:
                 print(f"Could not start recorder: {e}")
@@ -98,8 +121,11 @@ def run_call(
     phone_number: str,
     record_path: Path,
     reg_timeout: int,
+    debug: bool = False,
 ) -> int:
     session = VoipSession()
+    debug_file = None
+    debug_lock = threading.Lock() if debug else None
     try:
         session.create_endpoint()
         session.create_account()
@@ -109,9 +135,20 @@ def run_call(
 
         dest_uri = session.build_uri(phone_number)
         print(f"Calling {dest_uri} ...")
-        call = PhoneCall(session.account, record_path)
+        if debug:
+            log_path = record_path.parent / f"app_phone_call_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            try:
+                debug_file = open(log_path, "w", encoding="utf-8")
+                print(f"Debug log: {log_path}")
+            except Exception as e:
+                print(f"Could not open debug log: {e}")
+                debug_file = None
+
+        call = PhoneCall(session.account, record_path, debug_file=debug_file, debug_lock=debug_lock)
         call_op = pj.CallOpParam(True)
         call.makeCall(dest_uri, call_op)
+        if debug and debug_file:
+            call._debug_log("call_started", f"dest={dest_uri}")
 
         end_requested = threading.Event()
 
@@ -136,6 +173,8 @@ def run_call(
 
         if record_path.exists():
             size_kb = record_path.stat().st_size / 1024
+            if debug and debug_file:
+                call._debug_log("recording_saved", f"path={record_path} size_kb={size_kb:.1f}")
             print(f"Recording saved: {record_path} ({size_kb:.1f} KB)")
         return 0
     except ValueError as exc:
@@ -145,6 +184,11 @@ def run_call(
         print(f"Call failed: {exc}")
         return 1
     finally:
+        if debug_file is not None:
+            try:
+                debug_file.close()
+            except Exception:
+                pass
         try:
             call = None
         except NameError:
@@ -164,25 +208,20 @@ def main() -> int:
         help="Destination phone number (e.g. 0035123456789 or extension)",
     )
     parser.add_argument(
-        "--output",
-        "-o",
-        type=str,
-        default=None,
-        help="Output WAV file path (default: recordings/app_phone_call_YYYYMMDD_HHMMSS.wav)",
-    )
-    parser.add_argument(
         "--reg-timeout",
         type=int,
         default=15,
         help="Registration timeout in seconds (default: 15)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write a timestamped event log to recordings/app_phone_call_debug_<ts>.log for debugging.",
+    )
     args = parser.parse_args()
 
-    record_path = Path(args.output) if args.output else get_default_record_path()
-    if record_path.parent and not record_path.parent.exists():
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-
-    return run_call(args.phone_number, record_path, args.reg_timeout)
+    record_path = get_default_record_path()
+    return run_call(args.phone_number, record_path, args.reg_timeout, debug=args.debug)
 
 
 if __name__ == "__main__":

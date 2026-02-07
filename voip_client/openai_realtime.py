@@ -79,6 +79,7 @@ class OpenAIRealtimeBridge:
         self._stop_event = threading.Event()
         self._session_ready = threading.Event()  # Set when session.updated is received
         self._response_done = threading.Event()  # Set when response.done is received
+        self._response_in_progress = False  # True between response.created and response.done
 
     # Public API ---------------------------------------------------------
 
@@ -88,8 +89,9 @@ class OpenAIRealtimeBridge:
             return
 
         self._stop_event.clear()
-        self._session_ready.clear()  # Reset session ready flag
-        self._response_done.clear()  # Reset response done flag
+        self._session_ready.clear()
+        self._response_done.clear()
+        self._response_in_progress = False
         self._thread = threading.Thread(
             target=self._run_loop, name="OpenAIRealtimeBridge", daemon=True
         )
@@ -269,9 +271,10 @@ class OpenAIRealtimeBridge:
             raise
 
     async def _request_response(self, ws: websockets.WebSocketClientProtocol) -> None:
-        """Commit current audio buffer and ask the model to respond."""
+        """Ask the model to respond. With server VAD, the server has already committed on speech_stopped."""
+        if self._response_in_progress:
+            return
         try:
-            await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
             await ws.send(json.dumps({"type": "response.create"}))
         except Exception as exc:
             print(f"[OpenAIRealtimeBridge] response.create error: {exc}")
@@ -284,12 +287,13 @@ class OpenAIRealtimeBridge:
         
         try:
             while True:
-                # Block briefly; if stop requested, exit
                 if self._stop_event.is_set():
                     return
                 try:
-                    chunk = self._input_q.get(timeout=0.1)
+                    chunk = self._input_q.get_nowait()
                 except Empty:
+                    # Yield so the receiver task can run (session.updated, audio deltas).
+                    await asyncio.sleep(0.02)
                     continue
 
                 if not chunk:
@@ -373,15 +377,18 @@ class OpenAIRealtimeBridge:
                     except Exception as exc:
                         print(f"[OpenAIRealtimeBridge] Failed to decode audio delta: {exc}")
                         continue
-                # Log response events
+                # Log response events and track in-progress
                 elif etype == "response.created":
+                    self._response_in_progress = True
                     print("[OpenAIRealtimeBridge] Response created")
                 elif etype == "response.done":
                     print("[OpenAIRealtimeBridge] Response done")
-                    self._response_done.set()  # Signal that response is complete
+                    self._response_done.set()
+                    self._response_in_progress = False
                 elif etype == "response.output_audio.done":
                     print("[OpenAIRealtimeBridge] Response audio done")
-                    self._response_done.set()  # Signal that audio is complete
+                    self._response_done.set()
+                    self._response_in_progress = False
                 elif etype == "response.audio_transcript.delta":
                     transcript_delta = event.get("delta", "")
                     if transcript_delta:

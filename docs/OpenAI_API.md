@@ -43,7 +43,7 @@ Phone User <--[SIP Audio]--> PJSIP <--[PCM Audio]--> WhisperAssistantBridge
       - `send_pcm(data: bytes)` - enqueue PCM16 audio for processing.
       - `recv_pcm(timeout: float) -> Optional[bytes]` - read PCM16 audio from TTS.
 
-- `voip_client/app_ai_bot_call.py`
+- `voip_client/app_ai_chatbot_call.py`
   - `AiBotCall(BaseVoipCall)`:
     - Uses the existing SIP session/account (`VoipSession`, `VoipAccount`).
     - On media active, starts a `WhisperAssistantBridge` and bridges audio between PJSIP and the AI.
@@ -51,7 +51,7 @@ Phone User <--[SIP Audio]--> PJSIP <--[PCM Audio]--> WhisperAssistantBridge
     - Exposes `--silence-duration` CLI flag to control turn-taking (how long to wait after silence before responding).
     - Exposes `--model` CLI flag to choose the chat model (default: `gpt-4o`).
 
-- `voip_client/app_ai_rt_call.py`
+- `voip_client/app_ai_realtime_call.py`
   - `AiRtCall(BaseVoipCall)`:
     - Uses the existing SIP session/account (`VoipSession`, `VoipAccount`).
     - On media active, creates an `OpenAIRealtimeBridge` and bridges audio between PJSIP and OpenAI Realtime.
@@ -83,7 +83,7 @@ or add them to `.env` (see `.env.example`) and ensure it is loaded before runnin
 From the project root, with your virtualenv active and PJSIP set up:
 
 ```bash
-python -m voip_client.app_ai_bot_call <phone_number> \
+python -m voip_client.app_ai_chatbot_call <phone_number> \
   --reg-timeout 15 \
   --system-message "You are a helpful AI assistant on a phone call. The caller may speak in English or Spanish. First, detect the caller's language and always reply in that same language. Keep responses short and easy to understand over the phone." \
   --voice alloy \
@@ -94,7 +94,7 @@ python -m voip_client.app_ai_bot_call <phone_number> \
 ### Usage: AI Realtime call
 
 ```bash
-python -m voip_client.app_ai_rt_call <phone_number> \
+python -m voip_client.app_ai_realtime_call <phone_number> \
   --reg-timeout 15 \
   --system-message "You are a helpful AI assistant on a phone call. The caller may speak in English or Spanish. First, detect the caller's language and always reply in that same language. Keep responses short and easy to understand over the phone." \
   --voice alloy \
@@ -105,6 +105,28 @@ python -m voip_client.app_ai_rt_call <phone_number> \
 - Both scripts register to your SIP server.
 - Place a call to `<phone_number>` using the same SIP configuration as other `app_*` tools.
 - Once the call media is active, they attach the AI bridge and let the AI **listen and respond in a natural conversation** until the call is ended.
+
+### Debugging the Realtime call
+
+If the Realtime call does not play AI audio to the other party (e.g. you hear nothing or audio only after hangup), use `--debug` to record a timestamped event log and iterate:
+
+1. **Run a call with debug and save-recordings:**
+   ```bash
+   python -m voip_client.app_ai_realtime_call <your_phone> --debug --save-recordings
+   ```
+2. **Answer on your phone**, speak briefly, then hang up or press Enter to end.
+3. **Inspect the debug log** written to `recordings/app_ai_realtime_call_debug_<timestamp>.log`. Events include:
+   - `call_started` – call placed
+   - `media_ready` – SIP media up, bridge started
+   - `response_queued` – AI response ready to play (should appear *before* `call_disconnected` if the call is working)
+   - `response_play_start` / `response_play_end` – playback on the call
+   - `call_disconnected` – remote hangup or local end
+   - `flush_start` / `flush_end` – drain after disconnect
+4. **Interpret:** If `response_queued` and `response_play_start` always come *after* `call_disconnected`, the AI reply is arriving too late (e.g. session or network delay). If they appear before disconnect but you still hear nothing, the issue is playback or media path.
+
+Use the log order and timestamps to guide fixes (e.g. session readiness, network, or playback).
+
+**Chatbot call:** `app_ai_chatbot_call` also supports `--debug`; it writes `recordings/app_ai_chatbot_call_debug_<timestamp>.log` with the same style of events (`call_started`, `media_ready`, `response_queued`, `response_play_start` / `response_play_end`, `call_disconnected`) for diagnosing timing or playback issues.
 
 ### Tuning turn-taking
 
@@ -117,7 +139,7 @@ The `--silence-duration` flag controls how long (in milliseconds) the assistant 
 Example with longer pause (bot):
 
 ```bash
-python -m voip_client.app_ai_bot_call <phone_number> --silence-duration 1500
+python -m voip_client.app_ai_chatbot_call <phone_number> --silence-duration 1500
 ```
 
 ### Notes and limitations
@@ -126,5 +148,5 @@ python -m voip_client.app_ai_bot_call <phone_number> --silence-duration 1500
 - The bridge uses energy-based VAD for turn detection. The silence threshold is set to -40 dB by default.
 - TTS audio from OpenAI (24 kHz) is resampled to 8 kHz for telephony (anti-aliasing used for downsampling).
 - Latency is higher than the Realtime API due to sequential API calls (STT -> Chat -> TTS), but cost is lower and you can use any chat model.
-- Use `--save-recordings` with `app_ai_bot_call` to save WAVs and transcripts; see **docs/AI_Assistant.md**.
+- Use `--save-recordings` with `app_ai_chatbot_call` to save WAVs and transcripts; see **docs/AI_Assistant.md**.
 - Conversation history is maintained in memory for multi-turn context. Long conversations may need history management to avoid hitting token limits.

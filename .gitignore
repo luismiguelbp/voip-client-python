@@ -18,6 +18,7 @@ venv/
 # Logs and recordings
 logs/
 recordings/
+tmp/
 
 # Cursor
 .cursorignore

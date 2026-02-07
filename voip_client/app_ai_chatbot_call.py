@@ -2,7 +2,7 @@
 AI Assistant using Whisper STT + Chat Completions + OpenAI TTS.
 
 Usage:
-    python -m voip_client.app_ai_bot_call <phone_number> [--silence-duration MS]
+    python -m voip_client.app_ai_chatbot_call <phone_number> [--silence-duration MS]
 
 This script:
 - Registers to the SIP server using the same .env as the other app_* tools
@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Optional, Tuple
@@ -117,13 +118,32 @@ class AiBotCall(BaseVoipCall):
         self._recordings_dir: Optional[Path] = None
         if save_recordings:
             call_ts = int(time.time())
-            self._recordings_dir = _recordings_dir() / f"app_ai_bot_call_{call_ts}"
+            self._recordings_dir = _recordings_dir() / f"app_ai_chatbot_call_{call_ts}"
             self._recordings_dir.mkdir(parents=True, exist_ok=True)
         # Queue of (pcm_bytes, response_index) produced by the IO thread.
         self._pending_responses: "Queue[Tuple[bytes, int]]" = Queue()
+        # Debug log: set by run_call when --debug (file handle + lock).
+        self._debug_file = None
+        self._debug_lock = None
+
+    def _debug_log(self, event: str, detail: str = "") -> None:
+        """Write a timestamped event line to the debug log file if --debug was used."""
+        f = getattr(self, "_debug_file", None)
+        lock = getattr(self, "_debug_lock", None)
+        if not f or not lock:
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        line = f"{ts} {event} {detail}\n"
+        try:
+            with lock:
+                f.write(line)
+                f.flush()
+        except Exception:
+            pass
 
     def _cleanup_media(self) -> None:
         """Stop bridge and IO thread on disconnect."""
+        self._debug_log("call_disconnected", "")
         self._io_stop.set()
 
         try:
@@ -207,7 +227,7 @@ class AiBotCall(BaseVoipCall):
 
                 # --- Recorder (C-level port): captures remote audio to WAV ---
                 ts = int(time.time())
-                self._recording_path = _tmp_dir() / f"rec_{ts}.wav"
+                self._recording_path = _tmp_dir() / f"app_ai_chatbot_call_rec_{ts}.wav"
                 self._recorder = pj.AudioMediaRecorder()
                 self._recorder.createRecorder(str(self._recording_path))
                 aud_med.startTransmit(self._recorder)
@@ -235,6 +255,7 @@ class AiBotCall(BaseVoipCall):
                     f"[AiBotCall] Media ready: sample_rate={self._sample_rate}, "
                     f"recording={self._recording_path}, model={model_name}"
                 )
+                self._debug_log("media_ready", f"sample_rate={self._sample_rate} model={model_name}")
             except Exception as exc:
                 print(f"[AiBotCall] Failed to set up media: {exc}")
                 return
@@ -338,9 +359,11 @@ class AiBotCall(BaseVoipCall):
                 if response_pcm and not self._io_stop.is_set():
                     # Hand off the response PCM to the main thread for playback.
                     try:
+                        pcm_bytes = bytes(response_pcm)
                         self._pending_responses.put(
-                            (bytes(response_pcm), response_counter), timeout=0.1
+                            (pcm_bytes, response_counter), timeout=0.1
                         )
+                        self._debug_log("response_queued", f"index={response_counter} bytes={len(pcm_bytes)}")
                         response_counter += 1
                     except Exception:
                         # Best-effort; drop response on failure.
@@ -357,11 +380,12 @@ class AiBotCall(BaseVoipCall):
         if self._aud_med is None or self._io_stop.is_set():
             return
 
-        wav_path = _tmp_dir() / f"resp_{int(time.time())}_{index}.wav"
+        wav_path = _tmp_dir() / f"app_ai_chatbot_call_resp_{int(time.time())}_{index}.wav"
         _write_wav(wav_path, pcm, self._sample_rate)
 
         duration_s = len(pcm) / (self._sample_rate * 2)
         print(f"[AiBotCall] Playing response {index} ({duration_s:.1f}s)")
+        self._debug_log("response_play_start", f"index={index} duration_s={duration_s:.2f}")
 
         try:
             player = pj.AudioMediaPlayer()
@@ -382,6 +406,7 @@ class AiBotCall(BaseVoipCall):
         except Exception as exc:
             print(f"[AiBotCall] Playback error: {exc}")
 
+        self._debug_log("response_play_end", f"index={index}")
         # Save response file if requested, otherwise clean up
         if self._save_recordings and self._recordings_dir:
             try:
@@ -417,6 +442,7 @@ def run_call(
     model: str,
     silence_duration_ms: int,
     save_recordings: bool = False,
+    debug: bool = False,
 ) -> int:
     """Place a call and attach AI Assistant (Whisper pipeline) when media is active."""
     session = VoipSession()
@@ -442,6 +468,17 @@ def run_call(
         )
         call_op = pj.CallOpParam(True)
         call.makeCall(dest_uri, call_op)
+
+        if debug:
+            log_dir = _recordings_dir()
+            log_path = log_dir / f"app_ai_chatbot_call_debug_{int(time.time())}.log"
+            try:
+                call._debug_file = open(log_path, "w", encoding="utf-8")
+                call._debug_lock = threading.Lock()
+                call._debug_log("call_started", f"dest={dest_uri}")
+                print(f"[AiBotCall] Debug log: {log_path}")
+            except Exception as e:
+                print(f"[AiBotCall] Could not open debug log: {e}")
 
         end_requested = threading.Event()
 
@@ -475,6 +512,17 @@ def run_call(
         print(f"Call failed: {exc}")
         return 1
     finally:
+        try:
+            c = call
+        except NameError:
+            c = None
+        if c is not None and getattr(c, "_debug_file", None) is not None:
+            try:
+                c._debug_file.close()
+            except Exception:
+                pass
+            c._debug_file = None
+        c = None
         try:
             call = None
         except NameError:
@@ -542,6 +590,11 @@ def main() -> int:
         action="store_true",
         help="Save all recordings (full call, speech segments, responses) to recordings/ directory for analysis.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write a timestamped event log to recordings/app_ai_chatbot_call_debug_<ts>.log for debugging call flow.",
+    )
     args = parser.parse_args()
 
     return run_call(
@@ -552,6 +605,7 @@ def main() -> int:
         model=args.model,
         silence_duration_ms=args.silence_duration,
         save_recordings=args.save_recordings,
+        debug=args.debug,
     )
 
 

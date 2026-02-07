@@ -17,13 +17,16 @@ except Exception as exc:
 def main() -> int:
     ep = PjsipEndpoint()
     try:
+        print("[trace] creating endpoint")
         ep.create()
+        print("[trace] endpoint created")
         print("PJSIP init OK")
         return 0
     except Exception as exc:
         print(f"PJSIP init failed: {exc}")
         return 1
     finally:
+        print("[trace] destroying endpoint")
         ep.destroy()
 
 

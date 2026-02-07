@@ -1,7 +1,7 @@
 """
 Common VoIP session, account, and call base classes.
 
-Shared by app_phone_call, app_echo_call, app_ai_bot_call, app_ai_rt_call,
+Shared by app_phone_call, app_echo_call, app_ai_chatbot_call, app_ai_realtime_call,
 voip_test_call, voip_echo_test, voip_dtmf_test, and pjsip_test_voip.
 All use the same .env SIP credentials.
 """

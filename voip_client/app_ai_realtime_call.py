@@ -2,7 +2,7 @@
 AI Assistant using OpenAI Realtime API (full-duplex audio via WebSocket).
 
 Usage:
-    python -m voip_client.app_ai_rt_call <phone_number> [--silence-duration MS]
+    python -m voip_client.app_ai_realtime_call <phone_number> [--silence-duration MS]
 
 This script:
 - Registers to the SIP server using the same .env as the other app_* tools
@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Optional, Tuple
@@ -182,13 +183,32 @@ class AiRtCall(BaseVoipCall):
         self._recordings_dir: Optional[Path] = None
         if save_recordings:
             call_ts = int(time.time())
-            self._recordings_dir = _recordings_dir() / f"app_ai_rt_call_{call_ts}"
+            self._recordings_dir = _recordings_dir() / f"app_ai_realtime_call_{call_ts}"
             self._recordings_dir.mkdir(parents=True, exist_ok=True)
         # Queue of (pcm_bytes, response_index) produced by the IO thread.
         self._pending_responses: "Queue[Tuple[bytes, int]]" = Queue()
+        # Debug log: set by run_call when --debug (file handle + lock).
+        self._debug_file = None
+        self._debug_lock = None
+
+    def _debug_log(self, event: str, detail: str = "") -> None:
+        """Write a timestamped event line to the debug log file if --debug was used."""
+        f = getattr(self, "_debug_file", None)
+        lock = getattr(self, "_debug_lock", None)
+        if not f or not lock:
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        line = f"{ts} {event} {detail}\n"
+        try:
+            with lock:
+                f.write(line)
+                f.flush()
+        except Exception:
+            pass
 
     def _cleanup_media(self) -> None:
         """Stop Realtime bridge and IO thread on disconnect."""
+        self._debug_log("call_disconnected", "")
         self._io_stop.set()
 
         if self._bridge is not None:
@@ -254,7 +274,7 @@ class AiRtCall(BaseVoipCall):
 
                 # --- Recorder (C-level port): captures remote audio to WAV ---
                 ts = int(time.time())
-                self._recording_path = _tmp_dir() / f"rec_rt_{ts}.wav"
+                self._recording_path = _tmp_dir() / f"app_ai_realtime_call_rec_{ts}.wav"
                 self._recorder = pj.AudioMediaRecorder()
                 self._recorder.createRecorder(str(self._recording_path))
                 aud_med.startTransmit(self._recorder)
@@ -292,6 +312,7 @@ class AiRtCall(BaseVoipCall):
                     f"[AiRtCall] Media ready: sample_rate={self._sample_rate}, "
                     f"recording={self._recording_path}, model={model_name}"
                 )
+                self._debug_log("media_ready", f"sample_rate={self._sample_rate} model={model_name}")
             except Exception as exc:
                 print(f"[AiRtCall] Failed to set up media: {exc}")
                 return
@@ -484,6 +505,7 @@ class AiRtCall(BaseVoipCall):
                             )
                             reason = "response complete" if response_complete else f"timeout ({current_time - last_audio_time:.2f}s)"
                             print(f"[AiRtCall] Queued response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz, {reason})")
+                            self._debug_log("response_queued", f"index={response_counter} bytes={len(response_pcm_bytes)} {reason}")
                             response_counter += 1
                             accumulated_response.clear()
                             last_audio_time = None
@@ -505,6 +527,7 @@ class AiRtCall(BaseVoipCall):
             # Drain any remaining audio from bridge before closing
             # Wait a bit longer to catch late-arriving audio after call ends
             if self._bridge:
+                self._debug_log("flush_start", "")
                 print("[AiRtCall] Flushing remaining audio from bridge...")
                 # First, drain any immediately available chunks
                 drained_any = False
@@ -566,10 +589,12 @@ class AiRtCall(BaseVoipCall):
                             (response_pcm_bytes, response_counter), timeout=0.1
                         )
                         print(f"[AiRtCall] Flushed final response {response_counter} ({len(response_pcm_bytes)} bytes @ {call_sample_rate}Hz)")
+                        self._debug_log("flush_end", f"flushed_bytes={len(response_pcm_bytes)}")
                     except Exception as exc:
                         print(f"[AiRtCall] Failed to flush final response: {exc}")
                 else:
                     print("[AiRtCall] No audio to flush")
+                    self._debug_log("flush_end", "no_audio")
             f.close()
 
     def _play_response(self, pcm: bytes, index: int) -> None:
@@ -577,11 +602,12 @@ class AiRtCall(BaseVoipCall):
         if self._aud_med is None or self._io_stop.is_set():
             return
 
-        wav_path = _tmp_dir() / f"resp_rt_{int(time.time())}_{index}.wav"
+        wav_path = _tmp_dir() / f"app_ai_realtime_call_resp_{int(time.time())}_{index}.wav"
         _write_wav(wav_path, pcm, self._sample_rate)
 
         duration_s = len(pcm) / (self._sample_rate * 2)
         print(f"[AiRtCall] Playing response {index} ({duration_s:.1f}s)")
+        self._debug_log("response_play_start", f"index={index} duration_s={duration_s:.2f}")
 
         try:
             player = pj.AudioMediaPlayer()
@@ -602,6 +628,7 @@ class AiRtCall(BaseVoipCall):
         except Exception as exc:
             print(f"[AiRtCall] Playback error: {exc}")
 
+        self._debug_log("response_play_end", f"index={index}")
         # Save response file if requested, otherwise clean up
         if self._save_recordings and self._recordings_dir:
             try:
@@ -639,6 +666,7 @@ def run_call(
     vad_threshold: float,
     prefix_padding_ms: int,
     save_recordings: bool = False,
+    debug: bool = False,
 ) -> int:
     """Place a call and attach OpenAI Realtime bridge when media is active."""
     session = VoipSession()
@@ -671,6 +699,17 @@ def run_call(
         )
         call_op = pj.CallOpParam(True)
         call.makeCall(dest_uri, call_op)
+
+        if debug:
+            log_dir = _recordings_dir()
+            log_path = log_dir / f"app_ai_realtime_call_debug_{int(time.time())}.log"
+            try:
+                call._debug_file = open(log_path, "w", encoding="utf-8")
+                call._debug_lock = threading.Lock()
+                call._debug_log("call_started", f"dest={dest_uri}")
+                print(f"[AiRtCall] Debug log: {log_path}")
+            except Exception as e:
+                print(f"[AiRtCall] Could not open debug log: {e}")
 
         end_requested = threading.Event()
 
@@ -705,9 +744,21 @@ def run_call(
         return 1
     finally:
         try:
+            c = call
+        except NameError:
+            c = None
+        if c is not None and getattr(c, "_debug_file", None) is not None:
+            try:
+                c._debug_file.close()
+            except Exception:
+                pass
+            c._debug_file = None
+        c = None
+        try:
             call = None
         except NameError:
             pass
+        # Release call before destroying session so pj.Call destructor runs while pjsua is still valid.
         session.destroy()
         # Clean up tmp directory (unless saving recordings for analysis)
         if not save_recordings:
@@ -783,6 +834,11 @@ def main() -> int:
         action="store_true",
         help="Save all recordings (full call, responses) to recordings/ directory for analysis.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write a timestamped event log to recordings/app_ai_realtime_call_debug_<ts>.log for debugging call flow.",
+    )
     args = parser.parse_args()
 
     return run_call(
@@ -795,6 +851,7 @@ def main() -> int:
         vad_threshold=args.vad_threshold,
         prefix_padding_ms=args.prefix_padding,
         save_recordings=args.save_recordings,
+        debug=args.debug,
     )
 
 
