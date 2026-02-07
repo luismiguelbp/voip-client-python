@@ -58,6 +58,8 @@ PJSUA2 provides SWIG-generated Python bindings for building VoIP applications.
    python3 -c "import pjsua2; print('OK')"
    ```
 
+   In this project (with the virtual environment activated): `python -m voip_client.pjsip_test` for a basic init test, or `python -m voip_client.pjsip_test_audio` for an audio device test.
+
 ## Basic Usage
 
 ```python

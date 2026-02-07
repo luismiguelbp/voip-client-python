@@ -1,4 +1,14 @@
+# pjsua2 is not on PyPI; build from source (see docs/PJSIP.md)
 [project]
 name = "voip-client"
 version = "0.1.0"
+description = "VoIP client using Python and PJSIP (pjsua2)."
+readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+    "websockets>=12.0",
+    "openai>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["voip_client*"]

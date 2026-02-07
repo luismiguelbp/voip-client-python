@@ -16,9 +16,9 @@ venv/
 .env
 
 # Logs and recordings
-logs/*
-!logs/.gitkeep
+logs/
 recordings/
+tmp/
 
 # Cursor
 .cursorignore

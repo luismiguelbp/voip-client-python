@@ -4,6 +4,8 @@ This guide explains how to connect a Python client that uses PJSIP to a
 VoIPstudio SIP account. It focuses on the data you must collect from your
 VoIPstudio portal and how to map it to typical PJSIP settings.
 
+In this project, SIP registration and calls use `voip_common` (VoipSession, BaseVoipCall). See the README for scripts: `pjsip_test_voip` (registration), `voip_test_call`, `voip_echo_test`, `voip_dtmf_test`, and `app_phone_call` / `app_echo_call`.
+
 ### Prerequisites
 
 - A VoIPstudio account with at least one SIP user or device created
